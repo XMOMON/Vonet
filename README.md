@@ -97,8 +97,9 @@ cd paper-trader
 docker-compose up -d --build
 
 # 4. Access:
-#    Frontend: http://localhost:5173
-#    Backend API: http://localhost:8000/docs
+#    Frontend Dashboard: http://localhost:5173
+#    Backend API Docs (Swagger): http://localhost:8000/docs
+#    Backend Root: http://localhost:8000
 ```
 
 Frontend port is 5173; backend runs on 8000.
