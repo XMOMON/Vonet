@@ -8,15 +8,26 @@ A full-featured crypto paper trading system with real-time price tracking, autom
 
 - **Signal Management**: Add trade signals with entry, TP1, TP2, SL, and reasoning
 - **Real-Time Tracking**: Monitors Binance prices via CCXT; auto-opens positions when price hits entry
-- **Partial Take-Profit**: 50% position closed at TP1, remainder trails to TP2
+- **Partial Take-Profit**: 50% position closed at TP1, remainder trails to TP2 with SL moved to breakeven
 - **Stop-Loss Protection**: Automatic liquidation if price hits SL
 - **Live Dashboard**: React UI with WebSocket updates; tracks unrealized PnL
-- **Telegram Alerts**: Instant notifications for signal created, position opened, TP1/TP2/SL hits
-- **Trade Journal**: Editable notes per closed trade
-- **Performance Stats**: Win rate, average R:R, Sharpe ratio, max drawdown, equity curve
-- **Per-Pair Analytics**: Breakdown by trading pair
+- **Telegram Bot**: Two-way — send `/status`, `/balance`, `/positions` for instant updates; alerts for signal created, TP1/TP2/SL hits, expirations
+- **Trade Journal**: Inline-editable notes per closed trade (`/journal` page)
+- **Performance Stats**: Win rate, average R:R, Sharpe, max drawdown, equity curve, per-pair breakdown
 - **Export**: Download trade history as CSV
+- **Webhook API**: `/webhooks/tradingview` endpoint for automated TradingView alerts (secret-protected)
 - **Dockerized**: One-command deployment with Docker Compose
+
+## ✨ Recent Enhancements (April 2026)
+
+- **Dashboard Revamp**: Live KPI cards (PnL, Win Rate, Max Drawdown, Trade Count) + interactive equity curve (Recharts) + portfolio heatmap
+- **Trade Journal**: Inline-editable notes per closed trade (`/journal` page)
+- **Per-Pair Analytics**: Stats breakdown by trading pair (win rate, avg PnL, total PnL) in `/stats`
+- **Signal Expiry**: Auto-cancellation of stale signals (`expires_at`) with Telegram alerts
+- **True Partial TP**: 50% position closes at TP1, remainder trails to TP2 with SL moved to breakeven
+- **Telegram Bot**: Two-way interaction — send `/status`, `/balance`, or `/positions` to get updates anywhere
+- **R:R Calculator**: Auto-calculated risk:reward shown in Signals list
+- **Webhook Endpoint**: `/webhooks/tradingview` for automated TradingView alerts (secret-protected)
 
 ---
 
@@ -136,16 +147,62 @@ Frontend port is 5173; backend runs on 8000.
 
 ---
 
-## 🔔 Telegram Alerts
+## 🔔 Telegram Alerts & Bot
 
-If configured, you'll receive messages for:
+If `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, you'll receive notifications for:
 
-- `📈 Signal Created`: Pair, direction, entry, TP, SL
+- `📈 Signal Created`: Pair, direction, entry, TP, SL, R:R
 - `🔔 Position Opened`: Entry price, size
-- `💰 TP1 Hit`: Partial profit amount
-- `🎯 TP2 Hit`: Full position closed (realized PnL)
+- `💰 TP1 Hit`: Partial profit amount (50% closed)
+- `🎯 TP2 Hit`: Full position closed (total realized PnL)
 - `⛔ SL Hit`: Loss amount
 - `⚠️ Signal Expired`: Entry window missed
+
+### Interactive Commands
+
+Send these commands to your bot in Telegram for instant status:
+
+- `/status` — Overall stats (total PnL, win rate, open positions count)
+- `/balance` — Current paper balance + unrealized PnL
+- `/positions` — List of open positions with current PnL
+- `/signals` — Recent signals (pending/executed)
+
+The bot responds within seconds.
+
+## 📡 Webhook Integration (TradingView)
+
+Your backend exposes `POST /webhooks/tradingview` to receive TradingView alerts.
+
+**Setup:**
+
+1. Set `WEBHOOK_SECRET` in `.env` (keep it random).
+2. In TradingView alert message, send JSON:
+
+```json
+{
+  "secret": "YOUR_WEBHOOK_SECRET",
+  "pair": "BTC/USDT",
+  "direction": "LONG",
+  "entry": 67500.0,
+  "tp1": 68500.0,
+  "tp2": 69500.0,
+  "sl": 66800.0,
+  "reason": "EMA crossover + RSI oversold"
+}
+```
+
+3. Webhook URL: `https://your-backend.onrender.com/webhooks/tradingview` (or `http://localhost:8000/webhooks/tradingview` locally)
+
+The endpoint validates the secret, checks for duplicates, enforces max positions, and creates a PENDING signal in your database — same as manual entry. Telegram alert is sent automatically.
+
+---
+
+### **Limitations / Manual Steps**
+
+- **Signal entry tolerance** is fixed at 0.5% of entry price
+- **Position sizing** is fixed % of current balance (configurable via `RISK_PER_TRADE`)
+- **Paper trading only** — no real orders placed (safe)
+- **Testnet recommended** if you connect real Binance API keys
 
 ---
 
