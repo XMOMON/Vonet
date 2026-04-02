@@ -30,14 +30,14 @@ export default function Stats() {
       link.href = url;
       
       const dateStr = new Date().toISOString().split('T')[0];
-      link.download = `trades_${dateStr}.csv`;
+      link.download = `paper_trader_${dateStr}.xlsx`;
       
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Error exporting CSV:', error);
+      console.error('Error exporting:', error);
     }
   };
 
@@ -63,7 +63,7 @@ export default function Stats() {
           onClick={handleExportCSV}
           style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          📥 Export Trades CSV
+          📥 Export Excel
         </button>
       </div>
 

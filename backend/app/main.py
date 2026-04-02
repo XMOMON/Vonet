@@ -2,10 +2,10 @@ import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import signals, positions, trades, stats, ws, export
+from app.routers import signals, positions, trades, stats, ws, export, webhooks, templates, risk
 from app.services.price import price_polling_loop
 from app.services.position import position_monitoring_loop
-from app.services.telegram import command_bot_loop
+from app.services.telegram import command_bot_loop, daily_report_loop
 
 app = FastAPI(title="Pro Paper Trader")
 
@@ -23,6 +23,9 @@ app.include_router(trades.router, prefix="/api/v1/trades", tags=["trades"])
 app.include_router(stats.router, prefix="/api/v1/stats", tags=["stats"])
 app.include_router(export.router, prefix="/api/v1/export", tags=["export"])
 app.include_router(ws.router, prefix="/ws", tags=["websocket"])
+app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])
+app.include_router(templates.router, prefix="/api/v1/templates", tags=["templates"])
+app.include_router(risk.router, prefix="/api/v1/risk", tags=["risk"])
 
 @app.on_event("startup")
 async def startup_event():
@@ -34,6 +37,7 @@ async def startup_event():
     asyncio.create_task(price_polling_loop())
     asyncio.create_task(position_monitoring_loop())
     asyncio.create_task(command_bot_loop())
+    asyncio.create_task(daily_report_loop())
 
 @app.get("/")
 def read_root():

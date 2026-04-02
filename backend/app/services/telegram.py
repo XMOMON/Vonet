@@ -138,9 +138,11 @@ async def _handle_command(text: str, chat_id: str):
     from sqlalchemy.future import select
     from sqlalchemy.sql import func
 
-    text = text.strip().lower().split()[0]  # grab first word
+    text_raw = text.strip()
+    parts = text_raw.split()
+    cmd = parts[0].lower()
 
-    if text == "/status" or text == "/start":
+    if cmd in ("/status", "/start"):
         async with async_session() as db:
             r1 = await db.execute(select(func.count(Position.id)).where(Position.status.in_([PositionStatus.OPEN, PositionStatus.PARTIAL])))
             open_count = r1.scalar() or 0
@@ -161,7 +163,7 @@ async def _handle_command(text: str, chat_id: str):
         )
         await send_telegram(msg, chat_id)
 
-    elif text == "/positions":
+    elif cmd == "/positions":
         async with async_session() as db:
             r = await db.execute(select(Position).where(Position.status.in_([PositionStatus.OPEN, PositionStatus.PARTIAL])))
             positions = r.scalars().all()
@@ -181,7 +183,7 @@ async def _handle_command(text: str, chat_id: str):
             )
         await send_telegram("\n".join(lines), chat_id)
 
-    elif text == "/balance":
+    elif cmd == "/balance":
         async with async_session() as db:
             r = await db.execute(select(func.sum(Trade.pnl_usd)))
             realized = r.scalar() or 0.0
@@ -198,15 +200,177 @@ async def _handle_command(text: str, chat_id: str):
         )
         await send_telegram(msg, chat_id)
 
-    elif text == "/help":
+    elif cmd == "/help":
         await send_telegram(
             "🤖 <b>Pro Paper Trader Bot</b>\n\n"
             "/status — Account overview\n"
             "/positions — All open positions\n"
             "/balance — Quick balance check\n"
+            "/daily — Today's performance report\n"
+            "/signal PAIR DIR ENTRY TP1 TP2 SL — Create signal\n"
+            "  e.g. /signal BTC/USDT LONG 65000 67000 70000 63000\n"
             "/help — This message",
             chat_id
         )
+
+    elif cmd == "/daily":
+        await _send_daily_report(chat_id)
+
+    elif cmd == "/signal":
+        # /signal BTC/USDT LONG 65000 67000 70000 63000 [reason...]
+        # parts: [0]=cmd [1]=pair [2]=dir [3]=entry [4]=tp1 [5]=tp2 [6]=sl [7+]=reason
+        if len(parts) < 7:
+            await send_telegram(
+                "❌ Usage: /signal PAIR DIRECTION ENTRY TP1 TP2 SL [reason]\n"
+                "Example: /signal BTC/USDT LONG 65000 67000 70000 63000",
+                chat_id
+            )
+            return
+        try:
+            pair = parts[1].upper().replace("-", "/")
+            direction = parts[2].upper()
+            entry = float(parts[3])
+            tp1 = float(parts[4])
+            tp2 = float(parts[5])
+            sl = float(parts[6])
+            reason = " ".join(parts[7:]) if len(parts) > 7 else "Telegram signal"
+        except ValueError:
+            await send_telegram("❌ Invalid numbers. Check entry/TP/SL values.", chat_id)
+            return
+
+        if direction not in ("LONG", "SHORT"):
+            await send_telegram("❌ Direction must be LONG or SHORT.", chat_id)
+            return
+
+        from app.models.all import Signal, SignalStatus, DirectionEnum, ConfidenceEnum
+        from datetime import datetime
+        try:
+            async with async_session() as db:
+                signal = Signal(
+                    pair=pair,
+                    direction=DirectionEnum[direction],
+                    entry=entry, tp1=tp1, tp2=tp2, sl=sl,
+                    reason=reason,
+                    confidence=ConfidenceEnum.BUY,
+                    source="telegram",
+                    status=SignalStatus.PENDING,
+                    created_at=datetime.utcnow(),
+                )
+                db.add(signal)
+                await db.commit()
+                await db.refresh(signal)
+
+            arrow = "🟢" if direction == "LONG" else "🔴"
+            rr = 0.0
+            if direction == "LONG" and (entry - sl) != 0:
+                rr = round((tp2 - entry) / (entry - sl), 2)
+            elif direction == "SHORT" and (sl - entry) != 0:
+                rr = round((entry - tp2) / (sl - entry), 2)
+
+            await send_telegram(
+                f"{arrow} <b>Signal Created via Telegram</b>\n\n"
+                f"Pair: <b>{pair}</b>  Direction: <b>{direction}</b>\n"
+                f"Entry: <b>${entry:,.4f}</b>\n"
+                f"TP1: <b>${tp1:,.4f}</b>  TP2: <b>${tp2:,.4f}</b>\n"
+                f"SL: <b>${sl:,.4f}</b>  R:R: <b>{rr}R</b>\n"
+                f"Reason: {reason}\n\n"
+                f"Signal ID: #{signal.id} — waiting for entry trigger...",
+                chat_id
+            )
+        except Exception as e:
+            await send_telegram(f"❌ Failed to create signal: {e}", chat_id)
+
+
+async def _send_daily_report(chat_id: str = None):
+    """Build and send the daily performance summary."""
+    from app.database import async_session
+    from app.models.all import Position, Trade, Signal, PositionStatus, SignalStatus
+    from sqlalchemy.future import select
+    from sqlalchemy.sql import func
+    from datetime import datetime, timezone, timedelta
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    async with async_session() as db:
+        # Today's closed trades
+        r_today = await db.execute(
+            select(Trade).where(Trade.closed_at >= today_start)
+        )
+        today_trades = r_today.scalars().all()
+
+        # All-time PnL
+        r_all = await db.execute(select(func.sum(Trade.pnl_usd)))
+        all_pnl = r_all.scalar() or 0.0
+
+        # Open positions
+        r_pos = await db.execute(
+            select(func.count(Position.id)).where(
+                Position.status.in_([PositionStatus.OPEN, PositionStatus.PARTIAL])
+            )
+        )
+        open_count = r_pos.scalar() or 0
+
+        # Pending signals
+        r_sig = await db.execute(
+            select(func.count(Signal.id)).where(Signal.status == SignalStatus.PENDING)
+        )
+        pending_signals = r_sig.scalar() or 0
+
+        # Unrealized
+        r_unr = await db.execute(
+            select(func.sum(Position.pnl_usd)).where(
+                Position.status.in_([PositionStatus.OPEN, PositionStatus.PARTIAL])
+            )
+        )
+        unrealized = r_unr.scalar() or 0.0
+
+    today_pnl = sum(t.pnl_usd or 0 for t in today_trades)
+    today_wins = sum(1 for t in today_trades if (t.pnl_usd or 0) > 0)
+    today_total = len(today_trades)
+    win_rate = round(today_wins / today_total * 100, 1) if today_total else 0
+
+    balance = 10000.0 + all_pnl
+    equity = balance + unrealized
+
+    sign_d = "+" if today_pnl >= 0 else ""
+    sign_t = "+" if all_pnl >= 0 else ""
+    icon = "📈" if today_pnl >= 0 else "📉"
+    date_str = datetime.now().strftime("%d %b %Y")
+
+    msg = (
+        f"{icon} <b>Daily Report — {date_str}</b>\n\n"
+        f"{'─' * 28}\n"
+        f"<b>TODAY</b>\n"
+        f"Trades Closed: <b>{today_total}</b>  |  Wins: <b>{today_wins}</b>\n"
+        f"Win Rate: <b>{win_rate}%</b>\n"
+        f"Daily P&amp;L: <b>{sign_d}${today_pnl:,.2f}</b>\n\n"
+        f"<b>ACCOUNT</b>\n"
+        f"Equity: <b>${equity:,.2f}</b>\n"
+        f"All-Time P&amp;L: <b>{sign_t}${all_pnl:,.2f}</b>\n"
+        f"Unrealized: <b>${unrealized:,.2f}</b>\n\n"
+        f"<b>LIVE</b>\n"
+        f"Open Positions: <b>{open_count}</b>\n"
+        f"Pending Signals: <b>{pending_signals}</b>"
+    )
+    await send_telegram(msg, chat_id)
+
+
+async def daily_report_loop():
+    """Fires the daily report at midnight UTC every day."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    print("Daily report loop started — will fire at midnight UTC")
+    while True:
+        now = __import__('datetime').datetime.utcnow()
+        # Seconds until next midnight UTC
+        tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = tomorrow.replace(day=tomorrow.day + 1)
+        secs = (tomorrow - now).total_seconds()
+        await asyncio.sleep(secs)
+        try:
+            await _send_daily_report()
+        except Exception as e:
+            print(f"Daily report error: {e}")
 
 
 async def command_bot_loop():

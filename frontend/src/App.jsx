@@ -8,6 +8,8 @@ import Positions from './Positions';
 import Signals from './Signals';
 import Stats from './Stats';
 import Journal from './Journal';
+import Risk from './Risk';
+import Webhook from './Webhook';
 import { useAppWebsocket } from './useAppWebsocket';
 import './index.css';
 
@@ -37,25 +39,29 @@ function Navigation({ lastMessage }) {
       <div style={{ margin: '0 20px 30px', padding: '15px', background: 'rgba(240,185,11,0.04)', borderRadius: '12px', border: '1px solid rgba(240,185,11,0.12)' }}>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '5px' }}>Account Equity</div>
         <div style={{ fontSize: '1.4rem', fontWeight: 600, color: 'var(--accent-primary)' }}>
-          ${balanceData ? balanceData.equity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---'}
+          ${balanceData?.equity != null ? balanceData.equity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---'}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', fontSize: '0.85rem' }}>
            <span style={{ color: 'var(--text-muted)' }}>Balance</span>
-           <span>${balanceData ? balanceData.balance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---'}</span>
+           <span>${balanceData?.balance != null ? balanceData.balance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---'}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px', fontSize: '0.85rem' }}>
            <span style={{ color: 'var(--text-muted)' }}>Open PnL</span>
            <span style={{ color: balanceData?.unrealized_pnl >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-             ${balanceData ? balanceData.unrealized_pnl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---'}
+             ${balanceData?.unrealized_pnl != null ? balanceData.unrealized_pnl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---'}
            </span>
         </div>
       </div>
 
-      <Link to="/" className={`nav-link ${isActive('/')}`}>Dashboard</Link>
-      <Link to="/positions" className={`nav-link ${isActive('/positions')}`}>Positions</Link>
-      <Link to="/signals" className={`nav-link ${isActive('/signals')}`}>Signals</Link>
-      <Link to="/stats" className={`nav-link ${isActive('/stats')}`}>Stats</Link>
-      <Link to="/journal" className={`nav-link ${isActive('/journal')}`}>Journal</Link>
+      <div className="nav-links">
+        <Link to="/" className={`nav-link ${isActive('/')}`}>Dashboard</Link>
+        <Link to="/positions" className={`nav-link ${isActive('/positions')}`}>Positions</Link>
+        <Link to="/signals" className={`nav-link ${isActive('/signals')}`}>Signals</Link>
+        <Link to="/stats" className={`nav-link ${isActive('/stats')}`}>Stats</Link>
+        <Link to="/journal" className={`nav-link ${isActive('/journal')}`}>Journal</Link>
+        <Link to="/risk" className={`nav-link ${isActive('/risk')}`}>Risk</Link>
+        <Link to="/webhook" className={`nav-link ${isActive('/webhook')}`}>Webhook</Link>
+      </div>
     </nav>
   );
 }
@@ -75,6 +81,8 @@ function App() {
           <Route path="/signals" element={<Signals />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/journal" element={<Journal />} />
+          <Route path="/risk" element={<Risk />} />
+          <Route path="/webhook" element={<Webhook />} />
         </Routes>
       </main>
     </Router>

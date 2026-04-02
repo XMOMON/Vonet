@@ -88,3 +88,17 @@ class BalanceHistory(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     balance_usd = Column(Float)
     unrealized_pnl = Column(Float)
+
+class SignalTemplate(Base):
+    __tablename__ = "signal_templates"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    pair = Column(String, nullable=False)
+    direction = Column(Enum(DirectionEnum), nullable=False)
+    tp1_pct = Column(Float, nullable=True)   # % distance from entry
+    tp2_pct = Column(Float, nullable=True)
+    sl_pct = Column(Float, nullable=True)
+    confidence = Column(Enum(ConfidenceEnum), nullable=True)
+    reason = Column(String, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
