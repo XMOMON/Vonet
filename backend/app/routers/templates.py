@@ -57,6 +57,19 @@ async def create_template(template: TemplateCreate, db: AsyncSession = Depends(g
     return db_template
 
 
+@router.put("/{template_id}", response_model=TemplateResponse)
+async def update_template(template_id: int, template: TemplateCreate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(SignalTemplate).where(SignalTemplate.id == template_id))
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    for key, value in template.model_dump().items():
+        setattr(tpl, key, value)
+    await db.commit()
+    await db.refresh(tpl)
+    return tpl
+
+
 @router.delete("/{template_id}")
 async def delete_template(template_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(

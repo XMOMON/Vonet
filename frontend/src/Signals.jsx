@@ -31,6 +31,8 @@ export default function Signals() {
   const [templateName, setTemplateName] = useState('');
   const [expandedNote, setExpandedNote] = useState(null);
   const [formData, setFormData] = useState(defaultForm);
+  const [loadedTemplate, setLoadedTemplate] = useState(null);
+  const [editingTemplateId, setEditingTemplateId] = useState(null);
 
   const fetchSignals = () => {
     fetch(`${API_URL}/api/v1/signals/`)
@@ -64,10 +66,20 @@ export default function Signals() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: ['entry', 'tp1', 'tp2', 'sl'].includes(name) ? parseFloat(value) || value : value
-    }));
+    setFormData(prev => {
+      const updated = { ...prev, [name]: ['entry', 'tp1', 'tp2', 'sl'].includes(name) ? parseFloat(value) || value : value };
+      
+      // Auto-calculate TP/SL based on loaded template if entry changes
+      if (name === 'entry' && loadedTemplate && updated.entry) {
+        const entry = parseFloat(updated.entry);
+        if (!isNaN(entry)) {
+          if (loadedTemplate.tp1_pct != null) updated.tp1 = parseFloat((entry * (1 + loadedTemplate.tp1_pct / 100)).toFixed(6));
+          if (loadedTemplate.tp2_pct != null) updated.tp2 = parseFloat((entry * (1 + loadedTemplate.tp2_pct / 100)).toFixed(6));
+          if (loadedTemplate.sl_pct != null) updated.sl = parseFloat((entry * (1 + loadedTemplate.sl_pct / 100)).toFixed(6));
+        }
+      }
+      return updated;
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -102,19 +114,28 @@ export default function Signals() {
     const sl_pct = entry ? ((sl - entry) / entry * 100) : null;
 
     try {
-      await fetch(`${API_URL}/api/v1/templates/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: templateName,
-          pair: formData.pair,
-          direction: formData.direction,
-          tp1_pct, tp2_pct, sl_pct,
-          confidence: formData.confidence,
-          reason: formData.reason,
-          notes: formData.notes,
-        })
-      });
+      if (editingTemplateId) {
+        await fetch(`${API_URL}/api/v1/templates/${editingTemplateId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: templateName, pair: formData.pair, direction: formData.direction,
+            tp1_pct, tp2_pct, sl_pct, confidence: formData.confidence,
+            reason: formData.reason, notes: formData.notes,
+          })
+        });
+        setEditingTemplateId(null);
+      } else {
+        await fetch(`${API_URL}/api/v1/templates/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: templateName, pair: formData.pair, direction: formData.direction,
+            tp1_pct, tp2_pct, sl_pct, confidence: formData.confidence,
+            reason: formData.reason, notes: formData.notes,
+          })
+        });
+      }
       setTemplateName('');
       setShowSaveTemplate(false);
       fetchTemplates();
@@ -123,7 +144,7 @@ export default function Signals() {
     }
   };
 
-  const handleLoadTemplate = (tpl) => {
+  const handleLoadTemplate = (tpl, isEdit = false) => {
     const entry = parseFloat(formData.entry) || 0;
     setFormData(prev => ({
       ...prev,
@@ -136,6 +157,16 @@ export default function Signals() {
       ...(entry && tpl.tp2_pct != null ? { tp2: parseFloat((entry * (1 + tpl.tp2_pct / 100)).toFixed(6)) } : {}),
       ...(entry && tpl.sl_pct != null ? { sl: parseFloat((entry * (1 + tpl.sl_pct / 100)).toFixed(6)) } : {}),
     }));
+    setLoadedTemplate(tpl);
+    if (isEdit) {
+      setEditingTemplateId(tpl.id);
+      setTemplateName(tpl.name);
+      setShowSaveTemplate(true);
+    } else {
+      setEditingTemplateId(null);
+      setTemplateName('');
+      setShowSaveTemplate(false);
+    }
     setShowTemplates(false);
     setShowModal(true);
   };
@@ -168,8 +199,8 @@ export default function Signals() {
 
       {/* Templates Panel */}
       {showTemplates && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="glass-panel" style={{ width: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="glass-panel" style={{ width: '520px', maxHeight: '100%', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 600 }}>Signal Templates</h2>
               <button onClick={() => setShowTemplates(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.4rem' }}>x</button>
@@ -202,7 +233,9 @@ export default function Signals() {
                     </div>
                     <div style={{ display: 'flex', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
                       <button className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '0.8rem' }}
-                        onClick={() => handleLoadTemplate(tpl)}>Load</button>
+                        onClick={() => handleLoadTemplate(tpl, false)}>Load</button>
+                      <button className="btn" style={{ padding: '6px 14px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.1)', color: '#fff' }}
+                        onClick={() => handleLoadTemplate(tpl, true)}>Edit</button>
                       <button className="btn btn-danger" style={{ padding: '6px 10px', fontSize: '0.8rem' }}
                         onClick={() => handleDeleteTemplate(tpl.id)}>Del</button>
                     </div>
@@ -216,8 +249,8 @@ export default function Signals() {
 
       {/* Signal Create Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="glass-panel" style={{ width: '440px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="glass-panel" style={{ width: '440px', maxHeight: '100%', overflowY: 'auto' }}>
             <h2 style={{ marginBottom: '20px', color: '#fff', fontSize: '1.2rem', fontWeight: 600 }}>Create New Signal</h2>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div style={{ display: 'flex', gap: '10px' }}>
@@ -298,8 +331,8 @@ export default function Signals() {
                       style={{ ...inputStyle, flex: 1 }}
                     />
                     <button type="button" className="btn" style={{ padding: '8px 14px', background: 'rgba(240,185,11,0.15)', color: 'var(--accent-primary)', border: '1px solid rgba(240,185,11,0.3)' }}
-                      onClick={handleSaveTemplate}>Save</button>
-                    <button type="button" onClick={() => setShowSaveTemplate(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}>x</button>
+                      onClick={handleSaveTemplate}>{editingTemplateId ? 'Update' : 'Save'}</button>
+                    <button type="button" onClick={() => { setShowSaveTemplate(false); setEditingTemplateId(null); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}>x</button>
                   </div>
                 )}
               </div>
