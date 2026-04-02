@@ -1,23 +1,23 @@
 import hmac
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy.sql import func
+from sqlalchemy import select, func
 from pydantic import BaseModel, Field
-from typing import Optional
 
 from app.config import settings
 from app.database import get_db
-from app.models.all import Signal, Position, DirectionEnum, ConfidenceEnum, SignalStatus, PositionStatus
-from app.services.telegram import send_telegram
+from app.models.all import Signal, DirectionEnum, SignalStatus
+from app.services.telegram import send_signal_created_alert
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["webhooks"])
 
+
+# ── Payload schema ────────────────────────────────────────────────────────────
 
 class TradingViewPayload(BaseModel):
     secret: str
@@ -28,39 +28,58 @@ class TradingViewPayload(BaseModel):
     tp2: float
     sl: float
     reason: str = ""
-    confidence: str = "BUY"
 
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _verify_secret(secret: str) -> None:
+    """Constant-time comparison to prevent timing attacks."""
     if not hmac.compare_digest(secret.encode(), settings.WEBHOOK_SECRET.encode()):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
 
 
 def _validate_levels(payload: TradingViewPayload) -> None:
+    """Ensure TP/SL levels make logical sense for the direction."""
     p = payload
     if p.direction == "LONG":
         if not (p.sl < p.entry < p.tp1):
-            raise HTTPException(status_code=422, detail="LONG requires: SL < entry < TP1")
+            raise HTTPException(
+                status_code=422,
+                detail="LONG requires: SL < entry < TP1"
+            )
         if p.tp2 and p.tp2 <= p.tp1:
-            raise HTTPException(status_code=422, detail="LONG requires: TP2 > TP1")
+            raise HTTPException(
+                status_code=422,
+                detail="LONG requires: TP2 > TP1"
+            )
     elif p.direction == "SHORT":
         if not (p.tp1 < p.entry < p.sl):
-            raise HTTPException(status_code=422, detail="SHORT requires: TP1 < entry < SL")
+            raise HTTPException(
+                status_code=422,
+                detail="SHORT requires: TP1 < entry < SL"
+            )
         if p.tp2 and p.tp2 >= p.tp1:
-            raise HTTPException(status_code=422, detail="SHORT requires: TP2 < TP1")
+            raise HTTPException(
+                status_code=422,
+                detail="SHORT requires: TP2 < TP1"
+            )
     else:
-        raise HTTPException(status_code=422, detail=f"direction must be LONG or SHORT, got: {p.direction}")
+        raise HTTPException(
+            status_code=422,
+            detail=f"direction must be LONG or SHORT, got: {p.direction}"
+        )
 
 
 async def _check_duplicate(pair: str, direction: str, db: AsyncSession) -> None:
+    """Reject if a PENDING signal for the same pair+direction already exists."""
     result = await db.execute(
         select(Signal).where(
             Signal.pair == pair,
-            Signal.direction == DirectionEnum[direction],
+            Signal.direction == direction,
             Signal.status == SignalStatus.PENDING,
         )
     )
-    existing = result.scalar_one_or_none()
+    existing = result.scalars().first()
     if existing:
         raise HTTPException(
             status_code=409,
@@ -69,10 +88,10 @@ async def _check_duplicate(pair: str, direction: str, db: AsyncSession) -> None:
 
 
 async def _check_max_positions(db: AsyncSession) -> None:
+    """Reject if open position count is at the configured maximum."""
+    from app.models.all import Position, PositionStatus
     result = await db.execute(
-        select(func.count()).select_from(Position).where(
-            Position.status.in_([PositionStatus.OPEN, PositionStatus.PARTIAL])
-        )
+        select(func.count()).where(Position.status == PositionStatus.OPEN)
     )
     count = result.scalar()
     if count >= settings.MAX_POSITIONS:
@@ -82,42 +101,28 @@ async def _check_max_positions(db: AsyncSession) -> None:
         )
 
 
+# ── Endpoint ──────────────────────────────────────────────────────────────────
+
 @router.post("/tradingview", status_code=201)
 async def tradingview_webhook(
     payload: TradingViewPayload,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Receive a TradingView alert and create a new signal.
-    
-    Send from TradingView alerts with JSON body:
-    {
-      "secret": "your_webhook_secret",
-      "pair": "BTC/USDT",
-      "direction": "LONG",
-      "entry": 65000,
-      "tp1": 67000,
-      "tp2": 70000,
-      "sl": 63000,
-      "reason": "Breakout long",
-      "confidence": "BUY"
-    }
-    """
+    # 1. Auth
     _verify_secret(payload.secret)
 
+    # 2. Normalize
     payload.pair = payload.pair.upper().replace("-", "/")
     payload.direction = payload.direction.upper()
 
-    # Validate confidence
-    try:
-        confidence_enum = ConfidenceEnum[payload.confidence.upper()]
-    except KeyError:
-        confidence_enum = ConfidenceEnum.BUY
-
+    # 3. Validate price levels
     _validate_levels(payload)
+
+    # 4. Business rule checks
     await _check_duplicate(payload.pair, payload.direction, db)
     await _check_max_positions(db)
 
+    # 5. Create signal
     signal = Signal(
         pair=payload.pair,
         direction=DirectionEnum[payload.direction],
@@ -126,7 +131,6 @@ async def tradingview_webhook(
         tp2=payload.tp2,
         sl=payload.sl,
         reason=payload.reason or "TradingView alert",
-        confidence=confidence_enum,
         source="tradingview",
         status=SignalStatus.PENDING,
         created_at=datetime.utcnow(),
@@ -135,25 +139,17 @@ async def tradingview_webhook(
     await db.commit()
     await db.refresh(signal)
 
-    logger.info(f"[Webhook] Signal created: {signal.id} | {signal.pair} {signal.direction.value}")
+    logger.info(f"[Webhook] Signal created: {signal.id} | {signal.pair} {signal.direction}")
 
-    arrow = "🟢" if payload.direction == "LONG" else "🔴"
-    rr_num = 0.0
-    if payload.direction == "LONG" and (payload.entry - payload.sl) != 0:
-        rr_num = round((payload.tp2 - payload.entry) / (payload.entry - payload.sl), 2)
-    elif payload.direction == "SHORT" and (payload.sl - payload.entry) != 0:
-        rr_num = round((payload.entry - payload.tp2) / (payload.sl - payload.entry), 2)
-
-    await send_telegram(
-        f"{arrow} <b>📡 TradingView Signal</b>\n\n"
-        f"Pair: <b>{signal.pair}</b>\n"
-        f"Direction: <b>{signal.direction.value}</b>\n"
-        f"Entry: <b>${signal.entry:,.4f}</b>\n"
-        f"TP1: <b>${signal.tp1:,.4f}</b>  TP2: <b>${signal.tp2:,.4f}</b>\n"
-        f"SL: <b>${signal.sl:,.4f}</b>\n"
-        f"R:R: <b>{rr_num}R</b>\n"
-        f"Reason: {signal.reason}\n\n"
-        f"⏳ Waiting for entry trigger..."
+    # 6. Telegram notification
+    await send_signal_created_alert(
+        pair=signal.pair,
+        direction=signal.direction.value,
+        entry=signal.entry,
+        tp1=signal.tp1,
+        tp2=signal.tp2,
+        sl=signal.sl,
+        confidence="BUY",
     )
 
     return {
