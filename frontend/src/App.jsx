@@ -87,6 +87,19 @@ function App() {
           <Route path="/risk" element={<Risk />} />
           <Route path="/webhook" element={<Webhook />} />
         </Routes>
+
+        {/* Page Footer */}
+        <footer style={{
+          marginTop: 'auto',
+          padding: '30px 20px',
+          textAlign: 'center',
+          borderTop: '1px solid rgba(255,255,255,0.05)',
+          color: 'var(--text-muted)',
+          fontSize: '0.85rem'
+        }}>
+          <img src="/alphahook-logo.svg" alt="AlphaHook" height="32" width="32" style={{ filter: 'drop-shadow(0 0 6px rgba(240,185,11,0.3))', marginBottom: '8px' }} />
+          <div>AlphaHook © 2026</div>
+        </footer>
       </main>
     </Router>
   );
