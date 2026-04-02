@@ -1,4 +1,4 @@
-# Pro Paper Trader
+# AlphaHook
 
 A full-featured crypto paper trading system with real-time price tracking, automated TP/SL monitoring, and Telegram alerts.
 

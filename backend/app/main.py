@@ -7,7 +7,7 @@ from app.services.price import price_polling_loop
 from app.services.position import position_monitoring_loop
 from app.services.telegram import command_bot_loop, daily_report_loop
 
-app = FastAPI(title="Pro Paper Trader")
+app = FastAPI(title="AlphaHook")
 
 app.add_middleware(
     CORSMiddleware,
