@@ -6,28 +6,32 @@ A full-featured crypto paper trading system with real-time price tracking, autom
 
 ## 🚀 Features
 
-- **Signal Management**: Add trade signals with entry, TP1, TP2, SL, and reasoning
-- **Real-Time Tracking**: Monitors Binance prices via CCXT; auto-opens positions when price hits entry
-- **Partial Take-Profit**: 50% position closed at TP1, remainder trails to TP2 with SL moved to breakeven
-- **Stop-Loss Protection**: Automatic liquidation if price hits SL
-- **Live Dashboard**: React UI with WebSocket updates; tracks unrealized PnL
-- **Telegram Bot**: Two-way — send `/status`, `/balance`, `/positions` for instant updates; alerts for signal created, TP1/TP2/SL hits, expirations
-- **Trade Journal**: Inline-editable notes per closed trade (`/journal` page)
-- **Performance Stats**: Win rate, average R:R, Sharpe, max drawdown, equity curve, per-pair breakdown
+- **Signal Management**: Add trade signals with entry, TP1, TP2, SL, and reasoning; optional expiry date
+- **Real-Time Tracking**: Monitors Binance prices via CCXT; auto-opens positions when price hits entry (±0.5% tolerance)
+- **Partial Take-Profit**: 50% position closes at TP1, remainder trails to TP2 with SL moved to breakeven
+- **Stop-Loss Protection**: Automatic liquidation if price hits SL; manual close button for emergency exits
+- **Live Dashboard**: React UI with WebSocket updates; tracks unrealized PnL, equity curve, portfolio heatmap
+- **Telegram Bot**: Two-way — send `/status`, `/balance`, `/positions`, `/daily` for instant updates; alerts for signal created, entry triggered, TP1/TP2/SL hits, signal expiry, manual close
+- **Trade Journal**: Inline-editable notes per closed trade + daily PnL heatmap calendar (`/journal` page) with daily PnL calendar heatmap
+- **Performance Stats**: Win rate, average R:R, Sharpe, max drawdown, equity curve, per-pair breakdown, daily PnL calendar
 - **Export**: Download trade history as CSV
-- **Webhook API**: `/webhooks/tradingview` endpoint for automated TradingView alerts (secret-protected)
+- **Webhook API**: `/api/v1/webhooks/tradingview` endpoint for automated TradingView alerts (secret-protected)
 - **Dockerized**: One-command deployment with Docker Compose
 
 ## ✨ Recent Enhancements (April 2026)
 
 - **Dashboard Revamp**: Live KPI cards (PnL, Win Rate, Max Drawdown, Trade Count) + interactive equity curve (Recharts) + portfolio heatmap
-- **Trade Journal**: Inline-editable notes per closed trade (`/journal` page)
+- **Trade Journal with Calendar**: Inline-editable notes per closed trade + daily PnL heatmap calendar (`/journal` page)
 - **Per-Pair Analytics**: Stats breakdown by trading pair (win rate, avg PnL, total PnL) in `/stats`
 - **Signal Expiry**: Auto-cancellation of stale signals (`expires_at`) with Telegram alerts
 - **True Partial TP**: 50% position closes at TP1, remainder trails to TP2 with SL moved to breakeven
-- **Telegram Bot**: Two-way interaction — send `/status`, `/balance`, or `/positions` to get updates anywhere
+- **Telegram Bot**:
+  - Alerts: signal created, entry triggered, TP1/TP2/SD hit, signal expired, manual close
+  - Commands: `/status`, `/balance`, `/positions`, `/daily` (today's trades summary)
+- **Manual Close Button**: Red ✕ button on Positions page to force-close a trade; creates Trade record and fires Telegram alert
+- **Webhook API**: POST `/api/v1/webhooks/tradingview` for automated TradingView alerts (secret auth, price validation, duplicate protection)
 - **R:R Calculator**: Auto-calculated risk:reward shown in Signals list
-- **Webhook Endpoint**: `/webhooks/tradingview` for automated TradingView alerts (secret-protected)
+- **Timezone Fix**: Migrated to timezone-aware datetime handling
 
 ## 📸 Screenshots
 
@@ -159,12 +163,13 @@ Frontend port is 5173; backend runs on 8000.
 
 If `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, you'll receive notifications for:
 
-- `📈 Signal Created`: Pair, direction, entry, TP, SL, R:R
-- `🔔 Position Opened`: Entry price, size
+- `📡 Signal Created`: Pair, direction, entry, TP, SL, R:R
+- `🔔 Entry Triggered`: Position opened with entry price and size
 - `💰 TP1 Hit`: Partial profit amount (50% closed)
 - `🎯 TP2 Hit`: Full position closed (total realized PnL)
 - `⛔ SL Hit`: Loss amount
 - `⚠️ Signal Expired`: Entry window missed
+- `✕ Manually Closed`: When you force-close from the UI
 
 ### Interactive Commands
 
@@ -174,6 +179,7 @@ Send these commands to your bot in Telegram for instant status:
 - `/balance` — Current paper balance + unrealized PnL
 - `/positions` — List of open positions with current PnL
 - `/signals` — Recent signals (pending/executed)
+- `/daily` — Today's trades summary (PnL, trade count)
 
 The bot responds within seconds.
 
