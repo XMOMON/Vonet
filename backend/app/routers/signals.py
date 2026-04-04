@@ -24,6 +24,7 @@ class SignalCreate(BaseModel):
     source: str
     notes: str = ""
     expires_at: Optional[datetime] = None
+    leverage: int = 30
 
 
 class SignalResponse(BaseModel):
@@ -41,6 +42,7 @@ class SignalResponse(BaseModel):
     expires_at: Optional[datetime] = None
     status: SignalStatus
     created_at: Optional[datetime] = None
+    leverage: int = 30
 
     class Config:
         from_attributes = True

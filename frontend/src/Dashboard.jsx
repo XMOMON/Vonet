@@ -97,16 +97,19 @@ function PortfolioHeatmap() {
   }
 
   const getColor = (pct) => {
-    if (pct > 3) return { bg: 'rgba(14,203,129,0.25)', border: 'rgba(14,203,129,0.5)', text: '#0ecb81' };
+    // With 30x leverage, 3% real move = 90% leveraged move, so scale thresholds
+    if (pct > 50) return { bg: 'rgba(14,203,129,0.25)', border: 'rgba(14,203,129,0.5)', text: '#0ecb81' };
     if (pct > 0) return { bg: 'rgba(14,203,129,0.1)', border: 'rgba(14,203,129,0.25)', text: '#0ecb81' };
-    if (pct > -1) return { bg: 'rgba(246,70,93,0.08)', border: 'rgba(246,70,93,0.2)', text: '#f6465d' };
+    if (pct > -20) return { bg: 'rgba(246,70,93,0.08)', border: 'rgba(246,70,93,0.2)', text: '#f6465d' };
     return { bg: 'rgba(246,70,93,0.22)', border: 'rgba(246,70,93,0.5)', text: '#f6465d' };
   };
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '10px' }}>
       {open.map(p => {
-        const pnlPct = p.pnl_usd / p.size_usd * 100;
+        const leverage = p.leverage || 30;
+        const margin = p.margin_usd || (p.size_usd / leverage);
+        const pnlPct = margin > 0 ? (p.pnl_usd / margin) * 100 : 0;  // leveraged %
         const c = getColor(pnlPct);
         const sign = p.pnl_usd >= 0 ? '+' : '';
         return (
@@ -121,7 +124,10 @@ function PortfolioHeatmap() {
             onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.03)'}
             onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
           >
-            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{p.pair}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{p.pair}</div>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f0b90b', background: 'rgba(240,185,11,0.1)', padding: '1px 5px', borderRadius: '4px' }}>x{leverage}</span>
+            </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px' }}>
               {p.direction} {p.status === 'PARTIAL' ? '· ½ rem.' : ''}
             </div>
@@ -129,10 +135,10 @@ function PortfolioHeatmap() {
               {sign}${p.pnl_usd?.toFixed(2)}
             </div>
             <div style={{ fontSize: '0.8rem', color: c.text }}>
-              {sign}{pnlPct.toFixed(2)}%
+              {sign}{pnlPct.toFixed(1)}% lev.
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '6px' }}>
-              @ ${p.current_price?.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              Margin: ${margin.toFixed(2)}
             </div>
           </div>
         );
@@ -162,7 +168,17 @@ export default function Dashboard() {
   return (
     <div className="animate-fade-in">
       <div className="page-header">
-        <h1 className="page-title">Dashboard</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1 className="page-title">Dashboard</h1>
+          <span style={{
+            fontSize: '0.75rem', fontWeight: 700, padding: '3px 10px',
+            borderRadius: '20px', background: 'rgba(240,185,11,0.12)',
+            color: '#f0b90b', border: '1px solid rgba(240,185,11,0.3)',
+            letterSpacing: '0.05em'
+          }}>
+            ⚡ FUTURES
+          </span>
+        </div>
       </div>
 
       {/* KPI Cards */}

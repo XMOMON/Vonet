@@ -41,6 +41,7 @@ class Signal(Base):
     expires_at = Column(DateTime, nullable=True)
     status = Column(Enum(SignalStatus), default=SignalStatus.PENDING)
     created_at = Column(DateTime, default=datetime.utcnow)
+    leverage = Column(Integer, default=30)  # futures leverage multiplier
 
     positions = relationship("Position", back_populates="signal")
 
@@ -55,7 +56,9 @@ class Position(Base):
     tp1 = Column(Float)
     tp2 = Column(Float)
     sl = Column(Float)
-    size_usd = Column(Float)
+    size_usd = Column(Float)   # notional value = margin * leverage
+    margin_usd = Column(Float, nullable=True)  # actual collateral locked
+    leverage = Column(Integer, default=30)     # futures leverage multiplier
     pnl_usd = Column(Float, default=0.0)
     status = Column(Enum(PositionStatus), default=PositionStatus.OPEN)
     opened_at = Column(DateTime, default=datetime.utcnow)

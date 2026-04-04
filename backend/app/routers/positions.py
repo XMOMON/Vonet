@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from datetime import datetime
 from app.database import get_db
 from app.models.all import Position, PositionStatus, Trade
@@ -21,13 +21,26 @@ class PositionResponse(BaseModel):
     tp2: Optional[float] = None
     sl: Optional[float] = None
     size_usd: Optional[float] = None
+    margin_usd: Optional[float] = None
+    leverage: int = 30
     pnl_usd: Optional[float] = 0.0
+    liq_price: Optional[float] = None  # computed
     status: str
     opened_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
+    @model_validator(mode='after')
+    def compute_liq_price(self):
+        """Liquidation price: entry moves against position by 1/leverage (100% margin loss)."""
+        if self.entry and self.leverage and self.leverage > 0:
+            liq_offset = self.entry / self.leverage
+            if self.direction == 'LONG':
+                self.liq_price = round(self.entry - liq_offset, 4)
+            else:
+                self.liq_price = round(self.entry + liq_offset, 4)
+        return self
 
 @router.get("/", response_model=List[PositionResponse])
 async def list_positions(db: AsyncSession = Depends(get_db)):
@@ -56,10 +69,11 @@ async def manual_close(position_id: int, db: AsyncSession = Depends(get_db)):
     pnl_pct = 0.0
 
     if position.entry and position.entry != 0:
+        lev = position.leverage or 30
         if position.direction.value == "LONG":
-            pnl_pct = ((current - position.entry) / position.entry) * 100
+            pnl_pct = ((current - position.entry) / position.entry) * 100 * lev
         else:
-            pnl_pct = ((position.entry - current) / position.entry) * 100
+            pnl_pct = ((position.entry - current) / position.entry) * 100 * lev
 
     trade = Trade(
         position_id=position.id,

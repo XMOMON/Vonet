@@ -19,8 +19,10 @@ const defaultForm = {
   confidence: 'BUY',
   source: 'Manual',
   notes: '',
-  expires_at: ''
+  expires_at: '',
+  leverage: 30
 };
+
 
 export default function Signals() {
   const [signals, setSignals] = useState([]);
@@ -268,6 +270,35 @@ export default function Signals() {
                 </div>
               </div>
 
+              {/* Leverage Row */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  ⚡ Leverage <span style={{ color: '#f0b90b', fontWeight: 700 }}>x{formData.leverage}</span>
+                </label>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {[5, 10, 20, 25, 30, 50, 75, 100].map(lev => (
+                    <button
+                      key={lev}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, leverage: lev }))}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        border: `1px solid ${formData.leverage === lev ? '#f0b90b' : 'rgba(255,255,255,0.1)'}`,
+                        background: formData.leverage === lev ? 'rgba(240,185,11,0.15)' : 'rgba(255,255,255,0.04)',
+                        color: formData.leverage === lev ? '#f0b90b' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      x{lev}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                 <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Entry Price</label>
                 <input type="number" step="any" name="entry" value={formData.entry} onChange={handleInputChange} required style={inputStyle} />
@@ -351,7 +382,8 @@ export default function Signals() {
           <thead>
             <tr>
               <th>Pair</th>
-              <th>Direction</th>
+              <th>Dir</th>
+              <th>Lev</th>
               <th>Entry</th>
               <th>TP1</th>
               <th>TP2</th>
@@ -385,6 +417,11 @@ export default function Signals() {
                         )}
                       </td>
                       <td><span className={`badge ${s.direction === 'LONG' ? 'badge-long' : 'badge-short'}`}>{s.direction}</span></td>
+                      <td>
+                        <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#f0b90b', background: 'rgba(240,185,11,0.1)', padding: '2px 7px', borderRadius: '6px', border: '1px solid rgba(240,185,11,0.25)' }}>
+                          x{s.leverage || 30}
+                        </span>
+                      </td>
                       <td>${s.entry?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4})}</td>
                       <td style={{color: 'var(--success)', fontSize: '0.9rem'}}>{s.tp1?.toLocaleString(undefined, {maximumFractionDigits: 4})}</td>
                       <td style={{color: 'var(--success)', fontSize: '0.9rem'}}>{s.tp2?.toLocaleString(undefined, {maximumFractionDigits: 4})}</td>

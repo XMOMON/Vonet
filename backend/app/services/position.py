@@ -17,6 +17,15 @@ async def _get_live_balance(db) -> float:
     return STARTING_BALANCE + realized
 
 
+def _calc_liq_price(entry: float, direction: str, leverage: int) -> float:
+    """Liquidation price when 100% of margin is lost (simplified, no fees)."""
+    liq_offset = entry / leverage
+    if direction == "LONG":
+        return entry - liq_offset
+    else:
+        return entry + liq_offset
+
+
 async def position_monitoring_loop():
     while True:
         try:
@@ -40,9 +49,11 @@ async def position_monitoring_loop():
                     tolerance = 0.005  # 0.5%
                     diff_pct = abs(price - signal.entry) / signal.entry
                     if diff_pct <= tolerance:
-                        # 5% dynamic position sizing based on live balance
+                        # 5% dynamic margin sizing based on live balance
                         live_balance = await _get_live_balance(db)
-                        auto_size = live_balance * 0.05
+                        leverage = signal.leverage or 30
+                        margin = live_balance * 0.05          # collateral posted
+                        notional = margin * leverage           # contract size
 
                         new_pos = Position(
                             signal_id=signal.id,
@@ -53,15 +64,17 @@ async def position_monitoring_loop():
                             tp1=signal.tp1,
                             tp2=signal.tp2,
                             sl=signal.sl,
-                            size_usd=auto_size,
+                            size_usd=notional,     # notional exposure
+                            margin_usd=margin,     # locked collateral
+                            leverage=leverage,
                             status=PositionStatus.OPEN,
                             opened_at=datetime.utcnow()
                         )
                         signal.status = SignalStatus.EXECUTED
                         db.add(new_pos)
                         await db.commit()
-                        await manager.broadcast({"type": "position_opened", "data": f"Entered {signal.direction.value} on {signal.pair} at ${price:.4f}"})
-                        await send_entry_alert(signal.pair, signal.direction.value, price, auto_size)
+                        await manager.broadcast({"type": "position_opened", "data": f"Futures {signal.direction.value} x{leverage} on {signal.pair} at ${price:.4f} | Margin: ${margin:.2f}"})
+                        await send_entry_alert(signal.pair, signal.direction.value, price, notional)
 
                 # ── 2. Monitor open positions ─────────────────────────────────
                 result = await db.execute(select(Position).where(Position.status.in_([PositionStatus.OPEN, PositionStatus.PARTIAL])))
@@ -73,14 +86,49 @@ async def position_monitoring_loop():
                         continue
 
                     pos.current_price = price
+                    leverage = pos.leverage or 30
+                    margin = pos.margin_usd or (pos.size_usd / leverage if pos.size_usd else 0)
 
-                    # Live PnL
+                    # ── Leveraged PnL ────────────────────────────────────────
+                    # pnl_pct here is the raw % move of the underlying
                     if pos.direction == DirectionEnum.LONG:
-                        pnl_pct = (price - pos.entry) / pos.entry * 100
+                        raw_pct = (price - pos.entry) / pos.entry * 100
                     else:
-                        pnl_pct = (pos.entry - price) / pos.entry * 100
+                        raw_pct = (pos.entry - price) / pos.entry * 100
 
-                    pos.pnl_usd = pos.size_usd * (pnl_pct / 100)
+                    leveraged_pct = raw_pct * leverage
+                    pos.pnl_usd = margin * (leveraged_pct / 100)
+
+                    # ── Liquidation check ────────────────────────────────────
+                    liq_price = _calc_liq_price(pos.entry, pos.direction.value, leverage)
+                    liquidated = False
+                    if pos.direction == DirectionEnum.LONG and price <= liq_price:
+                        liquidated = True
+                    elif pos.direction == DirectionEnum.SHORT and price >= liq_price:
+                        liquidated = True
+
+                    if liquidated:
+                        pos.status = PositionStatus.CLOSED
+                        pos.exit_price = price
+                        pos.exit_reason = "LIQUIDATED"
+                        pos.closed_at = datetime.utcnow()
+                        pos.pnl_usd = -margin  # lose all margin
+
+                        liq_trade = Trade(
+                            position_id=pos.id,
+                            pair=pos.pair,
+                            entry=pos.entry,
+                            exit=price,
+                            pnl_usd=-margin,
+                            pnl_pct=-100.0,
+                            exit_reason="LIQUIDATED",
+                            opened_at=pos.opened_at,
+                            closed_at=pos.closed_at
+                        )
+                        db.add(liq_trade)
+                        await manager.broadcast({"type": "position_liquidated", "data": f"LIQUIDATED {pos.pair} {pos.direction.value} x{leverage} at ${price:.4f} | Loss: -${margin:.2f}"})
+                        await send_close_alert(pos.pair, pos.direction.value, pos.entry, price, -margin, -100.0, "LIQUIDATED")
+                        continue
 
                     should_close = False
                     exit_reason = ""
@@ -90,9 +138,9 @@ async def position_monitoring_loop():
                             should_close = True
                             exit_reason = "TP2"
                         elif price >= pos.tp1 and pos.status == PositionStatus.OPEN:
-                            # ── Partial close at TP1 (50%) ──
-                            half_size = pos.size_usd * 0.5
-                            half_pnl_usd = half_size * (pnl_pct / 100)
+                            # ── Partial close at TP1 (50% of margin) ──
+                            half_margin = margin * 0.5
+                            half_pnl_usd = half_margin * (leveraged_pct / 100)
 
                             partial_trade = Trade(
                                 position_id=pos.id,
@@ -100,20 +148,22 @@ async def position_monitoring_loop():
                                 entry=pos.entry,
                                 exit=price,
                                 pnl_usd=half_pnl_usd,
-                                pnl_pct=pnl_pct,
+                                pnl_pct=leveraged_pct,
                                 exit_reason="TP1_PARTIAL",
                                 opened_at=pos.opened_at,
                                 closed_at=datetime.utcnow()
                             )
                             db.add(partial_trade)
 
-                            pos.size_usd = half_size          # reduce to half
-                            pos.pnl_usd = pos.size_usd * (pnl_pct / 100)
+                            # Reduce position to half
+                            pos.margin_usd = half_margin
+                            pos.size_usd = pos.size_usd * 0.5
+                            pos.pnl_usd = half_margin * (leveraged_pct / 100)
                             pos.status = PositionStatus.PARTIAL
-                            pos.sl = pos.entry                # breakeven SL
+                            pos.sl = pos.entry   # move SL to breakeven
 
                             await send_tp1_alert(pos.pair, pos.direction.value, price, half_pnl_usd)
-                            await manager.broadcast({"type": "tp1_hit", "data": f"TP1 hit on {pos.pair} — 50% closed at ${price:.4f}"})
+                            await manager.broadcast({"type": "tp1_hit", "data": f"TP1 hit on {pos.pair} — 50% closed at ${price:.4f} | PnL: +${half_pnl_usd:.2f}"})
 
                         elif price <= pos.sl:
                             should_close = True
@@ -124,9 +174,8 @@ async def position_monitoring_loop():
                             should_close = True
                             exit_reason = "TP2"
                         elif price <= pos.tp1 and pos.status == PositionStatus.OPEN:
-                            # ── Partial close at TP1 (50%) ──
-                            half_size = pos.size_usd * 0.5
-                            half_pnl_usd = half_size * (pnl_pct / 100)
+                            half_margin = margin * 0.5
+                            half_pnl_usd = half_margin * (leveraged_pct / 100)
 
                             partial_trade = Trade(
                                 position_id=pos.id,
@@ -134,20 +183,21 @@ async def position_monitoring_loop():
                                 entry=pos.entry,
                                 exit=price,
                                 pnl_usd=half_pnl_usd,
-                                pnl_pct=pnl_pct,
+                                pnl_pct=leveraged_pct,
                                 exit_reason="TP1_PARTIAL",
                                 opened_at=pos.opened_at,
                                 closed_at=datetime.utcnow()
                             )
                             db.add(partial_trade)
 
-                            pos.size_usd = half_size
-                            pos.pnl_usd = pos.size_usd * (pnl_pct / 100)
+                            pos.margin_usd = half_margin
+                            pos.size_usd = pos.size_usd * 0.5
+                            pos.pnl_usd = half_margin * (leveraged_pct / 100)
                             pos.status = PositionStatus.PARTIAL
-                            pos.sl = pos.entry               # breakeven SL
+                            pos.sl = pos.entry   # breakeven SL
 
                             await send_tp1_alert(pos.pair, pos.direction.value, price, half_pnl_usd)
-                            await manager.broadcast({"type": "tp1_hit", "data": f"TP1 hit on {pos.pair} — 50% closed at ${price:.4f}"})
+                            await manager.broadcast({"type": "tp1_hit", "data": f"TP1 hit on {pos.pair} — 50% closed at ${price:.4f} | PnL: +${half_pnl_usd:.2f}"})
 
                         elif price >= pos.sl:
                             should_close = True
@@ -166,14 +216,14 @@ async def position_monitoring_loop():
                             entry=pos.entry,
                             exit=price,
                             pnl_usd=pos.pnl_usd,
-                            pnl_pct=pnl_pct,
+                            pnl_pct=leveraged_pct,
                             exit_reason=exit_reason,
                             opened_at=pos.opened_at,
                             closed_at=pos.closed_at
                         )
                         db.add(new_trade)
-                        await manager.broadcast({"type": "position_closed", "data": f"Closed {pos.pair} ({exit_reason}) PnL: ${pos.pnl_usd:.2f}"})
-                        await send_close_alert(pos.pair, pos.direction.value, pos.entry, price, pos.pnl_usd, pnl_pct, exit_reason)
+                        await manager.broadcast({"type": "position_closed", "data": f"Closed {pos.pair} x{leverage} ({exit_reason}) PnL: ${pos.pnl_usd:.2f}"})
+                        await send_close_alert(pos.pair, pos.direction.value, pos.entry, price, pos.pnl_usd, leveraged_pct, exit_reason)
 
                 # ── 3. Snapshot balance history every cycle ───────────────────
                 live_balance = await _get_live_balance(db)
