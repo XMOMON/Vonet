@@ -105,6 +105,29 @@ async def send_signal_expired_alert(pair: str, direction: str):
 
 
 # ─────────────────────────────────────────────
+# Profit milestone alerts (+25%, +50%, +100%)
+# ─────────────────────────────────────────────
+async def send_profit_milestone_alert(pair: str, direction: str, price: float, pnl_usd: float, pnl_pct: float, milestone: str):
+    """Send notification when floating profit hits a milestone (+25%, +50%, +100%)."""
+    icons = {
+        "25%": "🔹",
+        "50%": "🔸",
+        "100%": "💎"
+    }
+    icon = icons.get(milestone, "🎯")
+    sign = "+" if pnl_usd >= 0 else ""
+    msg = (
+        f"{icon} <b>PROFIT MILESTONE REACHED</b>\n\n"
+        f"Pair: <b>{pair}</b>\n"
+        f"Direction: <b>{direction}</b>\n"
+        f"Current Price: <b>${price:,.4f}</b>\n"
+        f"Floating PnL: <b>{sign}${pnl_usd:,.2f} ({sign}{pnl_pct:.2f}%)</b>\n\n"
+        f"🏆 Hit <b>{milestone}</b> of target!"
+    )
+    await send_telegram(msg)
+
+
+# ─────────────────────────────────────────────
 # Command Bot (two-way: /status, /positions, /balance)
 # ─────────────────────────────────────────────
 _last_update_id = 0

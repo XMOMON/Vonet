@@ -5,8 +5,7 @@ import pandas as pd
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.signal import Signal
-from app.models.trade import Trade
+from app.models.all import Signal, Trade
 import ccxt.async_support as ccxt
 import os
 

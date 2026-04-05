@@ -86,7 +86,7 @@ function App() {
           <Route path="/journal" element={<Journal />} />
           <Route path="/risk" element={<Risk />} />
           <Route path="/webhook" element={<Webhook />} />
-          <Route path="/backtest" element={<Backtest />} />
+          {/* <Route path="/backtest" element={<Backtest />} /> */}
         </Routes>
 
         {/* Page Footer */}

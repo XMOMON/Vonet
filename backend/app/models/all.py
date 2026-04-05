@@ -65,6 +65,7 @@ class Position(Base):
     closed_at = Column(DateTime, nullable=True)
     exit_price = Column(Float, nullable=True)
     exit_reason = Column(String, nullable=True)
+    profit_milestones_sent = Column(Text, nullable=True)  # comma-separated: "25%,50%,100%"
 
     signal = relationship("Signal", back_populates="positions")
     trades = relationship("Trade", back_populates="position")

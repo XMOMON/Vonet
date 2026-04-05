@@ -163,7 +163,14 @@ export default function Dashboard() {
     return () => clearInterval(iv);
   }, []);
 
-  const pnlColor = stats ? (stats.realized_pnl >= 0 ? 'var(--success)' : 'var(--danger)') : '#fff';
+  // Map backend response to expected fields
+  const realizedPnl = stats?.total_pnl ?? 0;
+  const winRate = stats?.win_rate ?? 0;
+  const maxDrawdown = stats?.advanced?.max_drawdown_pct ?? 0;
+  const totalTrades = stats?.total_trades ?? 0;
+  const avgPnlPct = stats?.avg_pnl_pct ?? 0;
+  // Unrealized PnL not in this endpoint; will be from balance widget separately
+  const pnlColor = realizedPnl >= 0 ? 'var(--success)' : 'var(--danger)';
 
   return (
     <div className="animate-fade-in">
@@ -186,27 +193,27 @@ export default function Dashboard() {
         <div className="glass-panel">
           <div className="form-label">Realized PnL</div>
           <div style={{ fontSize: '1.8rem', fontWeight: 700, color: pnlColor }}>
-            {stats ? `${stats.realized_pnl >= 0 ? '+' : ''}$${stats.realized_pnl.toFixed(2)}` : '—'}
+            {realizedPnl >= 0 ? '+' : ''}{realizedPnl.toFixed(2)}
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Unrealized: {stats ? `$${stats.unrealized_pnl.toFixed(2)}` : '—'}
+            Unrealized: {stats?.unrealized_pnl != null ? `$${stats.unrealized_pnl.toFixed(2)}` : '—'}
           </div>
         </div>
 
         <div className="glass-panel">
           <div className="form-label">Win Rate</div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: stats?.win_rate >= 50 ? 'var(--success)' : 'var(--warning)' }}>
-            {stats ? `${stats.win_rate.toFixed(1)}%` : '—'}
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: winRate >= 50 ? 'var(--success)' : 'var(--warning)' }}>
+            {winRate.toFixed(1)}%
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {stats ? `${stats.wins}W / ${stats.total_trades - stats.wins}L` : '—'}
+            {totalTrades > 0 ? `${Math.round(winRate * totalTrades / 100)}W / ${totalTrades - Math.round(winRate * totalTrades / 100)}L` : '—'}
           </div>
         </div>
 
         <div className="glass-panel">
           <div className="form-label">Max Drawdown</div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: stats?.max_drawdown > 10 ? 'var(--danger)' : 'var(--warning)' }}>
-            {stats ? `${stats.max_drawdown.toFixed(2)}%` : '—'}
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: maxDrawdown > 10 ? 'var(--danger)' : 'var(--warning)' }}>
+            {maxDrawdown.toFixed(2)}%
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>Peak-to-trough</div>
         </div>
@@ -214,10 +221,10 @@ export default function Dashboard() {
         <div className="glass-panel">
           <div className="form-label">Total Trades</div>
           <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-primary)' }}>
-            {stats?.total_trades ?? '—'}
+            {totalTrades}
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Avg: {stats ? `${stats.avg_pnl_pct.toFixed(2)}% / trade` : '—'}
+            Avg: {avgPnlPct.toFixed(2)}% / trade
           </div>
         </div>
       </div>

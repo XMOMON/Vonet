@@ -6,7 +6,7 @@ from sqlalchemy.future import select
 from sqlalchemy.sql import func
 from app.services.price import get_current_price
 from app.routers.ws import manager
-from app.services.telegram import send_entry_alert, send_tp1_alert, send_close_alert, send_signal_expired_alert
+from app.services.telegram import send_entry_alert, send_tp1_alert, send_close_alert, send_signal_expired_alert, send_profit_milestone_alert
 
 STARTING_BALANCE = 10000.0
 
@@ -98,6 +98,25 @@ async def position_monitoring_loop():
 
                     leveraged_pct = raw_pct * leverage
                     pos.pnl_usd = margin * (leveraged_pct / 100)
+
+                    # ── Profit Milestone Notifications (+10% test, +25%, +50%, +100%) ─────
+                    # Track which milestones have been sent to avoid spam
+                    sent = set()
+                    if pos.profit_milestones_sent:
+                        sent = set(pos.profit_milestones_sent.split(','))
+                    for milestone_pct in [10, 25, 50, 100]:  # 10% for testing
+                        if leveraged_pct >= milestone_pct and f"{milestone_pct}%" not in sent:
+                            await send_profit_milestone_alert(
+                                pos.pair,
+                                pos.direction.value,
+                                price,
+                                pos.pnl_usd,
+                                leveraged_pct,
+                                f"{milestone_pct}%"
+                            )
+                            sent.add(f"{milestone_pct}%")
+                            pos.profit_milestones_sent = ','.join(sorted(sent))
+                    # ────────────────────────────────────────────────────────────
 
                     # ── Liquidation check ────────────────────────────────────
                     liq_price = _calc_liq_price(pos.entry, pos.direction.value, leverage)
